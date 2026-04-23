@@ -1,29 +1,9 @@
-// Emacs style mode select   -*- C++ -*- 
-//-----------------------------------------------------------------------------
-//
-// $Id:$
-//
-// Copyright (C) 1993-1996 by id Software, Inc.
-//
-// This source is available for distribution and/or modification
-// only under the terms of the DOOM Source Code License as
-// published by id Software. All rights reserved.
-//
-// The source is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// FITNESS FOR A PARTICULAR PURPOSE. See the DOOM Source Code License
-// for more details.
-//
-// $Log:$
-//
 // DESCRIPTION:
 //	DOOM main program (D_DoomMain) and game loop (D_DoomLoop),
 //	plus functions to determine game mode (shareware, registered),
 //	parse command line parameters, configure game parameters (turbo),
 //	and call the startup functions.
-//
 //-----------------------------------------------------------------------------
-
 
 static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 
@@ -721,73 +701,103 @@ void IdentifyVersion (void)
 //
 void FindResponseFile (void)
 {
-    int             i;
-#define MAXARGVS        100
-	
-    for (i = 1;i < myargc;i++)
-	if (myargv[i][0] == '@')
-	{
-	    FILE *          handle;
-	    int             size;
-	    int             k;
-	    int             index;
-	    int             indexinfile;
-	    char    *infile;
-	    char    *file;
-	    char    *moreargs[20];
-	    char    *firstargv;
-			
-	    // READ THE RESPONSE FILE INTO MEMORY
-	    handle = fopen (&myargv[i][1],"rb");
-	    if (!handle)
-	    {
-		printf ("\nNo such response file!");
-		exit(1);
-	    }
-	    printf("Found response file %s!\n",&myargv[i][1]);
-	    fseek (handle,0,SEEK_END);
-	    size = ftell(handle);
-	    fseek (handle,0,SEEK_SET);
-	    file = malloc (size);
-	    fread (file,size,1,handle);
-	    fclose (handle);
-			
-	    // KEEP ALL CMDLINE ARGS FOLLOWING @RESPONSEFILE ARG
-	    for (index = 0,k = i+1; k < myargc; k++)
-		moreargs[index++] = myargv[k];
-			
-	    firstargv = myargv[0];
-	    myargv = malloc(sizeof(char *)*MAXARGVS);
-	    memset(myargv,0,sizeof(char *)*MAXARGVS);
-	    myargv[0] = firstargv;
-			
-	    infile = file;
-	    indexinfile = k = 0;
-	    indexinfile++;  // SKIP PAST ARGV[0] (KEEP IT)
-	    do
-	    {
-		myargv[indexinfile++] = infile+k;
-		while(k < size &&
-		      ((*(infile+k)>= ' '+1) && (*(infile+k)<='z')))
-		    k++;
-		*(infile+k) = 0;
-		while(k < size &&
-		      ((*(infile+k)<= ' ') || (*(infile+k)>'z')))
-		    k++;
-	    } while(k < size);
-			
-	    for (k = 0;k < index;k++)
-		myargv[indexinfile++] = moreargs[k];
-	    myargc = indexinfile;
-	
-	    // DISPLAY ARGS
-	    printf("%d command-line args:\n",myargc);
-	    for (k=1;k<myargc;k++)
-		printf("%s\n",myargv[k]);
+	#define MAXARGVS 100
 
-	    break;
+    for (int i = 1; i < myargc; i++)
+	{
+		if (myargv[i][0] == '@')
+			{	
+	    		// READ THE RESPONSE FILE INTO MEMORY
+				char *filename = &myargv[i][1];
+				FILE *handle = fopen(filename, "rb");
+				
+				if (!handle)
+				{
+					printf("\nNo such response file!");
+					exit(1);
+				}
+				
+				printf("Found response file %s!\n", filename);
+				
+				// load file
+				fseek(handle, 0, SEEK_END);
+				long size = ftell(handle);
+				fseek(handle, 0, SEEK_SET);
+				
+				char *buffer = malloc(size + 1);
+				if (!buffer)
+				{
+					printf("Out of memory reading response file\n");
+					exit(1);
+				}
+				
+				fread(buffer, 1, size,  handle);
+				buffer[size] = '\0';
+				fclose(handle);
+				
+				// save remaining CLI arguments
+				char *remainingArgs[MAXARGVS];
+				int remainingCount = 0;
+				
+				for (int k = i + 1; k < myargc; k++)
+				{
+					remainingArgs[remainingCount++] = myargv[k];
+				}
+				
+				// rebuild argv
+				char *originalArg0 = myargv[0];
+				
+				myargv = calloc(MAXARGVS, sizeof(char *));
+				myargv[0] = originalArg0;
+				
+				int argcNew = 1;
+				
+				// tokenize response file
+				char *p = buffer;
+				
+				while (*p && argcNew < MAXARGVS)
+				{
+					// skip whitespace
+					while (*p && isspace((unsigned char)*p))
+						p++;
+					
+					if (!*p)
+						break;
+					
+					// start of token
+					myargv[argcNew++] = p;
+					
+					// advance until next whitespace
+					while (*p && !isspace((unsigned char)*p))
+						p++;
+					
+					// terminate token
+					if (*p)
+					{
+						*p = '\0';
+						p++;
+					}
+				}
+				
+				// append remaining CLI args				
+				for (int k = 0; k < remainingCount &&argcNew < MAXARGVS; k++)
+				{
+					myargv[argcNew++] = remainingArgs[k];
+				}
+				
+				myargc = argcNew;
+				
+				// debug output
+				printf("%d command-line args:\n", myargc);
+				for (int k = 1; k < myargc; k++)
+				{
+					printf("%s\n", myargv[k]);
+				}
+				
+				break;
+			}
 	}
-}
+}		
 
 
 //
@@ -795,110 +805,88 @@ void FindResponseFile (void)
 //
 void D_DoomMain (void)
 {
-    int             p;
-    char                    file[256];
+    int param;
+    char file[256];
 
-    FindResponseFile ();
-	
-    IdentifyVersion ();
-	
-    setbuf (stdout, NULL);
+    FindResponseFile();
+    IdentifyVersion();
+
+    setbuf(stdout, NULL);
+
     modifiedgame = false;
-	
-    nomonsters = M_CheckParm ("-nomonsters");
-    respawnparm = M_CheckParm ("-respawn");
-    fastparm = M_CheckParm ("-fast");
-    devparm = M_CheckParm ("-devparm");
-    if (M_CheckParm ("-altdeath"))
-	deathmatch = 2;
-    else if (M_CheckParm ("-deathmatch"))
-	deathmatch = 1;
 
-    switch ( gamemode )
+    nomonsters = M_CheckParm("-nomonsters");
+    respawnparm = M_CheckParm("-respawn");
+    fastparm = M_CheckParm("-fast");
+    devparm = M_CheckParm("-devparm");
+
+    if (M_CheckParm("-altdeath"))
+		deathmatch = 2;
+    else if (M_CheckParm ("-deathmatch"))
+		deathmatch = 1;
+
+    switch (gamemode)
     {
-      case retail:
-	sprintf (title,
-		 "                         "
-		 "The Ultimate DOOM Startup v%i.%i"
-		 "                           ",
-		 VERSION/100,VERSION%100);
-	break;
-      case shareware:
-	sprintf (title,
-		 "                            "
-		 "DOOM Shareware Startup v%i.%i"
-		 "                           ",
-		 VERSION/100,VERSION%100);
-	break;
-      case registered:
-	sprintf (title,
-		 "                            "
-		 "DOOM Registered Startup v%i.%i"
-		 "                           ",
-		 VERSION/100,VERSION%100);
-	break;
-      case commercial:
-	sprintf (title,
-		 "                         "
-		 "DOOM 2: Hell on Earth v%i.%i"
-		 "                           ",
-		 VERSION/100,VERSION%100);
-	break;
-/*FIXME
-       case pack_plut:
-	sprintf (title,
-		 "                   "
-		 "DOOM 2: Plutonia Experiment v%i.%i"
-		 "                           ",
-		 VERSION/100,VERSION%100);
-	break;
-      case pack_tnt:
-	sprintf (title,
-		 "                     "
-		 "DOOM 2: TNT - Evilution v%i.%i"
-		 "                           ",
-		 VERSION/100,VERSION%100);
-	break;
-*/
-      default:
-	sprintf (title,
-		 "                     "
-		 "Public DOOM - v%i.%i"
-		 "                           ",
-		 VERSION/100,VERSION%100);
-	break;
+		case retail:
+			snprintf (title,"The Ultimate DOOM Startup v%i.%i", VERSION/100,VERSION%100);
+			break;
+		
+		case shareware:
+			snprintf (title, "DOOM Shareware Startup v%i.%i", VERSION/100,VERSION%100);
+			break;
+		
+		case registered:
+			snprintf (title, "DOOM Registered Startup v%i.%i", VERSION/100,VERSION%100);
+			break;
+		
+		case commercial:
+			snprintf (title, "DOOM 2: Hell on Earth v%i.%i",VERSION/100,VERSION%100);
+			break;
+		default:
+			snprintf (title, "Public DOOM - v%i.%i", VERSION/100,VERSION%100);
+			break;
     }
-    
-    printf ("%s\n",title);
+
+    printf("%s\n",title);
 
     if (devparm)
-	printf(D_DEVSTR);
+		printf(D_DEVSTR);
     
     if (M_CheckParm("-cdrom"))
     {
-	printf(D_CDROM);
-	mkdir("c:\\doomdata",0);
-	strcpy (basedefault,"c:/doomdata/default.cfg");
+		printf(D_CDROM);
+		mkdir("c:\\doomdata",0);
+		// mkdir("doomdata", 0755); mac equivalent
+
+		strcpy (basedefault,"c:/doomdata/default.cfg");
     }	
     
-    // turbo option
-    if ( (p=M_CheckParm ("-turbo")) )
+    // turbo gameplay modifier option
+    param = M_CheckParm("-turbo");
+	if (param != 0)
     {
-	int     scale = 200;
-	extern int forwardmove[2];
-	extern int sidemove[2];
-	
-	if (p<myargc-1)
-	    scale = atoi (myargv[p+1]);
-	if (scale < 10)
-	    scale = 10;
-	if (scale > 400)
-	    scale = 400;
-	printf ("turbo scale: %i%%\n",scale);
-	forwardmove[0] = forwardmove[0]*scale/100;
-	forwardmove[1] = forwardmove[1]*scale/100;
-	sidemove[0] = sidemove[0]*scale/100;
-	sidemove[1] = sidemove[1]*scale/100;
+		int scale = 200;
+
+		extern int forwardmove[2];
+		extern int sidemove[2];
+		
+		// read optional scale argument
+		if (param < myargc - 1)
+			scale = atoi(myargv[param+1]);
+		
+		// clamp scale
+		if (scale < 10)
+			scale = 10;
+		if (scale > 400)
+			scale = 400;
+		
+		printf("turbo scale: %i%%\n", scale);
+		
+		// apply scaling to movement values
+		forwardmove[0] *= scale/100;
+		forwardmove[1] *= scale/100;
+		sidemove[0] *= scale/100;
+		sidemove[1] *= scale/100;
     }
     
     // add any files specified on the command line with -file wadfile
